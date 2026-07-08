@@ -1,0 +1,31 @@
+services:
+  db:
+    image: postgres:16
+    container_name: hotelbook-db
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-hotelbook}
+      POSTGRES_USER: ${POSTGRES_USER:-app_admin}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-local_dev_password}
+    ports:
+      - "${POSTGRES_PORT:-5432}:5432"
+    volumes:
+      # Persistent data across `docker compose down` (but not `down -v`).
+      - pgdata:/var/lib/postgresql/data
+      # The official postgres image runs any *.sql / *.sh file placed
+      # directly in /docker-entrypoint-initdb.d, in alphabetical order, but
+      # ONLY the very first time the data volume is created (empty data
+      # dir). Mounting each file individually (rather than the whole
+      # sql/ folder) guarantees they land at the top level in the right
+      # 001 -> 002 -> 003 order.
+      - ./sql/migrations/001_create_tables.sql:/docker-entrypoint-initdb.d/001_create_tables.sql:ro
+      - ./sql/migrations/002_add_indexes.sql:/docker-entrypoint-initdb.d/002_add_indexes.sql:ro
+      - ./sql/seed/seed.sql:/docker-entrypoint-initdb.d/003_seed.sql:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-app_admin} -d ${POSTGRES_DB:-hotelbook}"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+volumes:
+  pgdata:

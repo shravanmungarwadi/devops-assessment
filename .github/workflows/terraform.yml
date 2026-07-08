@@ -1,0 +1,116 @@
+name: Terraform Plan
+
+on:
+  pull_request:
+    paths:
+      - "infra/**"
+      - ".github/workflows/terraform.yml"
+
+permissions:
+  contents: read
+  pull-requests: write
+
+env:
+  TF_VERSION: "1.9.5"
+
+jobs:
+  terraform:
+    name: terraform (${{ matrix.env }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        env: [dev, prod]
+
+    defaults:
+      run:
+        working-directory: infra/envs/${{ matrix.env }}
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: ${{ env.TF_VERSION }}
+
+      - name: Terraform Format Check
+        id: fmt
+        run: terraform fmt -check -recursive ../../..
+        continue-on-error: true
+
+      # No AWS credentials/backend are configured in CI, so init runs
+      # without the remote backend. This is enough to validate the code and
+      # produce a plan-only, offline-friendly review as required by the
+      # assessment (no real AWS deployment).
+      - name: Terraform Init (no backend)
+        id: init
+        run: terraform init -backend=false
+
+      - name: Terraform Validate
+        id: validate
+        run: terraform validate -no-color
+
+      - name: Terraform Plan
+        id: plan
+        run: |
+          terraform plan -no-color -refresh=false \
+            -var-file="${{ matrix.env }}.tfvars" \
+            -var="db_password=placeholder-for-ci-plan-only" \
+            -out=tfplan.binary
+        continue-on-error: true
+
+      - name: Save human-readable plan
+        if: always()
+        run: terraform show -no-color tfplan.binary > tfplan.txt || true
+
+      - name: Upload plan as workflow artifact
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: terraform-plan-${{ matrix.env }}
+          path: infra/envs/${{ matrix.env }}/tfplan.txt
+
+      - name: Comment plan on PR
+        if: always()
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const fs = require('fs');
+            const path = 'infra/envs/${{ matrix.env }}/tfplan.txt';
+            let planOutput = 'No plan output was produced.';
+            if (fs.existsSync(path)) {
+              planOutput = fs.readFileSync(path, 'utf8');
+              // Keep the comment within GitHub's size limits.
+              const maxLen = 60000;
+              if (planOutput.length > maxLen) {
+                planOutput = planOutput.substring(0, maxLen) + '\n... (truncated, see workflow artifact for full plan)';
+              }
+            }
+
+            const body = [
+              `### Terraform Plan - \`${{ matrix.env }}\``,
+              `- Format check: \`${{ steps.fmt.outcome }}\``,
+              `- Init: \`${{ steps.init.outcome }}\``,
+              `- Validate: \`${{ steps.validate.outcome }}\``,
+              `- Plan: \`${{ steps.plan.outcome }}\``,
+              '',
+              '<details><summary>Show plan output</summary>',
+              '',
+              '```',
+              planOutput,
+              '```',
+              '</details>'
+            ].join('\n');
+
+            github.rest.issues.createComment({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: context.issue.number,
+              body,
+            });
+
+      - name: Fail job if validate or plan failed
+        if: steps.validate.outcome == 'failure' || steps.plan.outcome == 'failure'
+        run: exit 1

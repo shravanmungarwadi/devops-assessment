@@ -1,0 +1,43 @@
+-- 002_add_indexes.sql
+--
+-- Target query (dashboard-style report, run frequently):
+--
+--   SELECT org_id, status, COUNT(*), SUM(amount)
+--   FROM hotel_bookings
+--   WHERE city = 'delhi'
+--     AND created_at >= NOW() - INTERVAL '30 days'
+--   GROUP BY org_id, status;
+--
+-- Without an index, Postgres has to sequentially scan every row in
+-- hotel_bookings to find the ones matching city + created_at, which gets
+-- slower as the table grows.
+--
+-- Index choice: a composite B-tree on (city, created_at).
+--   - city is an equality filter, so it belongs first in the index -
+--     Postgres can jump straight to the 'delhi' rows.
+--   - created_at is a range filter (>=), so it belongs second - within the
+--     'delhi' rows, Postgres can further narrow to the last 30 days using
+--     the same index (an index range scan), instead of scanning all of
+--     delhi's history.
+--   - org_id/status are GROUP BY columns, not filter columns, so they do
+--     not need to be part of the index; they're cheap to aggregate once the
+--     row set is already small.
+--
+-- This turns the plan from a full "Seq Scan" into an "Index Scan" (visible
+-- via EXPLAIN ANALYZE - see README.md), which is the key win as the table
+-- grows past a few thousand rows.
+
+CREATE INDEX IF NOT EXISTS idx_hotel_bookings_city_created_at
+    ON hotel_bookings (city, created_at);
+
+-- Optional covering-index variant (commented out): adding org_id, status,
+-- and amount as INCLUDE columns lets Postgres answer the whole query from
+-- the index alone (an "Index Only Scan"), avoiding a trip to the table
+-- (heap fetch) entirely. Trade-off: bigger index on disk and slightly
+-- slower writes, since every INSERT/UPDATE also has to maintain the wider
+-- index. Left as an option rather than the default since the base
+-- composite index already fixes the main cost (the sequential scan).
+--
+-- CREATE INDEX IF NOT EXISTS idx_hotel_bookings_city_created_at_covering
+--     ON hotel_bookings (city, created_at)
+--     INCLUDE (org_id, status, amount);
