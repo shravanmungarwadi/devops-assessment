@@ -54,3 +54,5 @@ module "ecs" {
     DB_NAME = module.rds.db_name
   }
 }
+
+# CI test
