@@ -25,6 +25,11 @@ jobs:
     defaults:
       run:
         working-directory: infra/envs/${{ matrix.env }}
+        
+    env:
+      AWS_ACCESS_KEY_ID: test
+      AWS_SECRET_ACCESS_KEY: test
+      AWS_DEFAULT_REGION: ap-south-1
 
     steps:
       - name: Checkout
