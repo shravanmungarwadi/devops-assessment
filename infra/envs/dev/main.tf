@@ -37,6 +37,7 @@ module "ecs" {
 
   project               = var.project
   environment           = var.environment
+  aws_region            = var.aws_region
   vpc_id                = module.network.vpc_id
   public_subnet_ids     = module.network.public_subnet_ids
   private_subnet_ids    = module.network.private_subnet_ids

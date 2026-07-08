@@ -8,6 +8,11 @@ variable "environment" {
   type        = string
 }
 
+variable "aws_region" {
+  description = "AWS region (used for CloudWatch log configuration)"
+  type        = string
+}
+
 variable "vpc_id" {
   description = "VPC ID the ECS service and ALB run in"
   type        = string
